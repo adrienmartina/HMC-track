@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matrix-hmc-track"
+version = "0.1.1"
+description = "Hybrid Monte Carlo for polarized IKKT-like matrix models"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = ["numpy", "torch"]
+
+[project.optional-dependencies]
+analysis = [
+    "matplotlib>=3.5",
+    "seaborn>=0.12",
+    "scipy>=1.9",
+]
+
+[project.scripts]
+matrix-hmc-track = "matrix_hmc_track.main:main"
+
+[tool.setuptools]
+packages = ["matrix_hmc_track", "matrix_hmc_track.models"]
+package-dir = { matrix_hmc_track = "." }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.urls]
+Homepage = "https://github.com/harish02murali/matrix-hmc-track"
