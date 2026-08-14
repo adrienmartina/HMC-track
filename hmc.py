@@ -97,7 +97,13 @@ def leapfrog(X: torch.Tensor, hmc_params: HMCParams, model: Any) -> tuple[torch.
     return X, ham_init, ham_final
 
 
-def update(acc_count: int, hmc_params: HMCParams, model: Any, reject_prob: float = 1.0):
+def update(
+    acc_count: int,
+    hmc_params: HMCParams,
+    model: Any,
+    reject_prob: float = 1.0,
+    verbose: bool = True,
+):
     """Run one HMC trajectory and apply a Metropolis accept/reject step.
 
     The model's internal state is updated in-place: on acceptance ``model.set_state``
@@ -132,17 +138,19 @@ def update(acc_count: int, hmc_params: HMCParams, model: Any, reject_prob: float
     if accept:
         model.set_state(X_new)
         acc_count += 1
-        print(f"ACCEPT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f}, ", model.status_string())
+        if verbose:
+            print(f"ACCEPT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f}, ", model.status_string())
     else:
         model.set_state(X_bak)
-        if finite_h0 and finite_h1 and finite_dh:
-            print(f"REJECT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f}, ", model.status_string())
-        else:
-            print(
-                "REJECT: non-finite Hamiltonian encountered "
-                f"(H0={H0}, H1={H1}, dH={dH}), ",
-                model.status_string(),
-            )
+        if verbose:
+            if finite_h0 and finite_h1 and finite_dh:
+                print(f"REJECT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f}, ", model.status_string())
+            else:
+                print(
+                    "REJECT: non-finite Hamiltonian encountered "
+                    f"(H0={H0}, H1={H1}, dH={dH}), ",
+                    model.status_string(),
+                )
 
     end_traj = getattr(model, "end_trajectory", None)
     if callable(end_traj):

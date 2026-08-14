@@ -40,11 +40,21 @@ def main() -> None:
         save_every=args.save_every,
         save_checkpoints=args.save,
         save_matrices=args.saveAllMats,
+        save_step_eigenvalues=args.save_step_eigenvalues,
+        track_escape=args.track_escape,
+        escape_descent_steps=args.escape_descent_steps,
+        escape_descent_step_size=args.escape_descent_step_size,
+        escape_validation_halvings=args.escape_validation_halvings,
+        escape_grad_tol=args.escape_grad_tol,
+        escape_trx2_atol=args.escape_trx2_atol,
+        escape_trx2_rtol=args.escape_trx2_rtol,
+        stop_on_escape=args.stop_on_escape,
         resume=args.resume and not args.fresh,
         force=args.force,
         seed=args.seed,
         profile=args.profile,
         dry_run=args.dry_run,
+        quiet_trajectories=args.quiet_trajectories,
     )
 
     print("Runtime =", time.time() - start, "s")

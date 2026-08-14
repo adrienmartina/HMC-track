@@ -375,10 +375,28 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Flush observables and (if --save) write checkpoint every K trajectories.")
     parser.add_argument("--saveAllMats", action="store_true",
                         help="Also dump raw matrix snapshots every --save-every trajectories.")
+    parser.add_argument("--save-step-eigenvalues", action=argparse.BooleanOptionalAction, default=True,
+                        help="Save type-II per-leapfrog-step eigenvalue diagnostics when available.")
+    parser.add_argument("--track-escape", action="store_true",
+                        help="Classify each HMC configuration by classical gradient descent and save escape.npz.")
+    parser.add_argument("--escape-descent-steps", type=int, default=1000,
+                        help="Maximum gradient descent steps for each escape/basin classification.")
+    parser.add_argument("--escape-descent-step-size", type=float, default=0.01,
+                        help="Initial gradient descent step size before backtracking for escape classification.")
+    parser.add_argument("--escape-validation-halvings", type=int, default=0,
+                        help="For escaped classifications, require this many repeat descents with halved step sizes to also escape.")
+    parser.add_argument("--escape-grad-tol", type=float, default=1e-8,
+                        help="Gradient Frobenius-norm tolerance for escape-classifier descent.")
+    parser.add_argument("--escape-trx2-atol", type=float, default=1e-6,
+                        help="Absolute tolerance for matching descended TrX2 to the initial saddle.")
+    parser.add_argument("--escape-trx2-rtol", type=float, default=1e-5,
+                        help="Relative tolerance for matching descended TrX2 to the initial saddle.")
+    parser.add_argument("--stop-on-escape", action="store_true",
+                        help="Stop the run immediately after the first escaped=True classification.")
     parser.add_argument("--resume", action="store_true",
                         help="Append to existing checkpoint and output files instead of starting fresh.")
     parser.add_argument("--fresh", action="store_true",
-                        help="Ignore any existing checkpoint and start from zero fields.")
+                        help="Ignore any existing checkpoint and start from the model's fresh initializer.")
     parser.add_argument("--force", action="store_true",
                         help="Overwrite output files in the selected run directory; fresh runs use a new _runN directory if needed.")
     parser.add_argument("--source", type=_parse_source, default=None,
@@ -394,6 +412,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="PyTorch inter-op CPU thread count.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the resolved configuration and exit without running.")
+    parser.add_argument("--quiet-trajectories", action="store_true",
+                        help="Suppress per-trajectory HMC accept/reject logging.")
     parser.add_argument("--profile", dest="profile", action="store_true", default=DEFAULT_PROFILE,
                         help="Enable cProfile sampling.")
     parser.add_argument("--no-profile", dest="profile", action="store_false",
@@ -592,6 +612,18 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--step-size must be positive")
     if args.save_every < 1:
         raise ValueError("--save-every must be positive")
+    if args.escape_descent_steps < 1:
+        raise ValueError("--escape-descent-steps must be positive")
+    if args.escape_descent_step_size <= 0:
+        raise ValueError("--escape-descent-step-size must be positive")
+    if args.escape_validation_halvings < 0:
+        raise ValueError("--escape-validation-halvings must be non-negative")
+    if args.escape_grad_tol <= 0:
+        raise ValueError("--escape-grad-tol must be positive")
+    if args.escape_trx2_atol < 0:
+        raise ValueError("--escape-trx2-atol must be non-negative")
+    if args.escape_trx2_rtol < 0:
+        raise ValueError("--escape-trx2-rtol must be non-negative")
     if args.pfaffian_every < 1:
         raise ValueError("--pfaffian-every must be positive")
     if args.threads is not None and args.threads < 1:
@@ -611,6 +643,18 @@ def _validate_common_args(args: argparse.Namespace) -> None:
         raise ValueError("--step-size must be positive")
     if args.save_every < 1:
         raise ValueError("--save-every must be positive")
+    if args.escape_descent_steps < 1:
+        raise ValueError("--escape-descent-steps must be positive")
+    if args.escape_descent_step_size <= 0:
+        raise ValueError("--escape-descent-step-size must be positive")
+    if args.escape_validation_halvings < 0:
+        raise ValueError("--escape-validation-halvings must be non-negative")
+    if args.escape_grad_tol <= 0:
+        raise ValueError("--escape-grad-tol must be positive")
+    if args.escape_trx2_atol < 0:
+        raise ValueError("--escape-trx2-atol must be non-negative")
+    if args.escape_trx2_rtol < 0:
+        raise ValueError("--escape-trx2-rtol must be non-negative")
     if args.pfaffian_every < 1:
         raise ValueError("--pfaffian-every must be positive")
     if args.threads is not None and args.threads < 1:
