@@ -103,6 +103,7 @@ def update(
     model: Any,
     reject_prob: float = 1.0,
     verbose: bool = True,
+    emit: Any = None,
 ):
     """Run one HMC trajectory and apply a Metropolis accept/reject step.
 
@@ -118,6 +119,10 @@ def update(
         reject_prob: Rescales the Metropolis probability by this factor so that
             ``p_accept = min(1, reject_prob * exp(-dH))``.  A value of 1.0
             (default) gives standard HMC.
+        emit: Optional callable receiving the trajectory status line instead of
+            printing it.  Lets a caller defer the line so that information only
+            available after the update (e.g. an escape classification) can be
+            appended before it reaches stdout.  ``None`` prints immediately.
     Returns:
         Updated acceptance counter ``acc_count``.
     """
@@ -135,21 +140,22 @@ def update(
         if dH > 0.0:
             accept = (-dH) > math.log(r)
 
+    sink = print if emit is None else emit
+
     if accept:
         model.set_state(X_new)
         acc_count += 1
         if verbose:
-            print(f"ACCEPT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f}, ", model.status_string())
+            sink(f"ACCEPT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f},  {model.status_string()}")
     else:
         model.set_state(X_bak)
         if verbose:
             if finite_h0 and finite_h1 and finite_dh:
-                print(f"REJECT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f}, ", model.status_string())
+                sink(f"REJECT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f},  {model.status_string()}")
             else:
-                print(
+                sink(
                     "REJECT: non-finite Hamiltonian encountered "
-                    f"(H0={H0}, H1={H1}, dH={dH}), ",
-                    model.status_string(),
+                    f"(H0={H0}, H1={H1}, dH={dH}),  {model.status_string()}"
                 )
 
     end_traj = getattr(model, "end_trajectory", None)

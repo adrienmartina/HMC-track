@@ -466,6 +466,7 @@ def _update_with_step_eig_recording(
     measure_step_eigenvalues,
     reject_prob: float = 1.0,
     verbose: bool = True,
+    emit=None,
 ) -> tuple[int, np.ndarray, bool]:
     """Run one HMC update and return per-step eigenvalues.
 
@@ -486,21 +487,22 @@ def _update_with_step_eig_recording(
         if dH > 0.0:
             accept = (-dH) > math.log(r)
 
+    sink = print if emit is None else emit
+
     if accept:
         model.set_state(X_new)
         acc_count += 1
         if verbose:
-            print(f"ACCEPT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f}, ", model.status_string())
+            sink(f"ACCEPT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f},  {model.status_string()}")
     else:
         model.set_state(X_bak)
         if verbose:
             if finite_h0 and finite_h1 and finite_dh:
-                print(f"REJECT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f}, ", model.status_string())
+                sink(f"REJECT: dH={dH: 8.3f}, expDH={np.exp(-dH): 8.3f}, H0={H0: 8.4f},  {model.status_string()}")
             else:
-                print(
+                sink(
                     "REJECT: non-finite Hamiltonian encountered "
-                    f"(H0={H0}, H1={H1}, dH={dH}), ",
-                    model.status_string(),
+                    f"(H0={H0}, H1={H1}, dH={dH}),  {model.status_string()}"
                 )
 
     end_traj = getattr(model, "end_trajectory", None)
@@ -880,6 +882,15 @@ def run(
     escape_classifications = 0
     escape_converged_count = 0
 
+    # When classifying escapes, hold the trajectory line back so the verdict can
+    # be appended to it before it is printed.
+    pending_traj_line: list[str] = []
+    traj_line_sink = (
+        pending_traj_line.append
+        if (track_escape and escape_path is not None and not quiet_trajectories)
+        else None
+    )
+
     if save_matrices:
         snapshot_dir, snapshot_offset = _prepare_matrix_snapshot_dir(
             paths["dir"], force=force, allow_existing=resume
@@ -889,12 +900,15 @@ def run(
 
     for i in range(1, niters + 1):
         completed_iters = i
+        escape_verdict: str | None = None
+        pending_traj_line.clear()
         if measure_step_eigenvalues is None:
             acc_count = update(
                 acc_count,
                 hmc_params,
                 model,
                 verbose=not quiet_trajectories,
+                emit=traj_line_sink,
             )
         else:
             acc_count, step_values, accepted = _update_with_step_eig_recording(
@@ -903,6 +917,7 @@ def run(
                 model,
                 measure_step_eigenvalues,
                 verbose=not quiet_trajectories,
+                emit=traj_line_sink,
             )
             if step_values.shape[0] != nsteps:
                 raise RuntimeError(
@@ -982,6 +997,9 @@ def run(
                     escaped = False
                     converged = converged and validation_converged
             escape_classifications += 1
+            escape_verdict = (
+                "Undecided" if not converged else ("True" if escaped else "False")
+            )
             if converged:
                 escape_converged_count += 1
             if escaped and not converged:
@@ -1011,6 +1029,12 @@ def run(
             if escaped and converged and run_stats["escape_first_reliable_iteration"] is None:
                 run_stats["escape_first_reliable_iteration"] = int(i)
                 run_stats["escape_reliable_detected"] = True
+
+        if pending_traj_line:
+            line = pending_traj_line.pop()
+            if escape_verdict is not None:
+                line = f"{line.rstrip()} has escaped = {escape_verdict}"
+            print(line)
 
         if i % save_every == 0:
             _flush_buffers(ev_buf, corr_buf, paths)
