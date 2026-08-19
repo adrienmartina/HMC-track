@@ -391,8 +391,15 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Absolute tolerance for matching descended TrX2 to the initial saddle.")
     parser.add_argument("--escape-trx2-rtol", type=float, default=1e-5,
                         help="Relative tolerance for matching descended TrX2 to the initial saddle.")
+    parser.add_argument("--escape-persistence", type=int, dest="escape_persistence", default=1,
+                        help="Number of CONSECUTIVE escaped classifications required before an escape "
+                             "is declared. The recorded escape time is the FIRST trajectory of that "
+                             "run, not the last. 1 (default) declares on the first escape, as before. "
+                             "Larger values reject recrossings of the separatrix, where the committor "
+                             "is ~1/2 and roughly half of all crossings fall back.")
     parser.add_argument("--stop-on-escape", action="store_true",
-                        help="Stop the run immediately after the first escaped=True classification.")
+                        help="Stop the run immediately after an escape is declared (see "
+                             "--escape-persistence).")
     parser.add_argument("--resume", action="store_true",
                         help="Append to existing checkpoint and output files instead of starting fresh.")
     parser.add_argument("--fresh", action="store_true",
@@ -618,6 +625,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--escape-descent-step-size must be positive")
     if args.escape_validation_halvings < 0:
         raise ValueError("--escape-validation-halvings must be non-negative")
+    if args.escape_persistence < 1:
+        raise ValueError("--escape-persistence must be at least 1")
     if args.escape_grad_tol <= 0:
         raise ValueError("--escape-grad-tol must be positive")
     if args.escape_trx2_atol < 0:
@@ -649,6 +658,8 @@ def _validate_common_args(args: argparse.Namespace) -> None:
         raise ValueError("--escape-descent-step-size must be positive")
     if args.escape_validation_halvings < 0:
         raise ValueError("--escape-validation-halvings must be non-negative")
+    if args.escape_persistence < 1:
+        raise ValueError("--escape-persistence must be at least 1")
     if args.escape_grad_tol <= 0:
         raise ValueError("--escape-grad-tol must be positive")
     if args.escape_trx2_atol < 0:

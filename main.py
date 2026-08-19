@@ -48,6 +48,7 @@ def main() -> None:
         escape_grad_tol=args.escape_grad_tol,
         escape_trx2_atol=args.escape_trx2_atol,
         escape_trx2_rtol=args.escape_trx2_rtol,
+        escape_persistence=args.escape_persistence,
         stop_on_escape=args.stop_on_escape,
         resume=args.resume and not args.fresh,
         force=args.force,

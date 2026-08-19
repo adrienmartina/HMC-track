@@ -584,6 +584,7 @@ def _base_run_stats(
     escape_trx2_rtol: float,
     escape_min_step_size: float,
     escape_max_backtracks: int,
+    escape_persistence: int,
     stop_on_escape: bool,
     resume: bool,
     force: bool,
@@ -621,6 +622,7 @@ def _base_run_stats(
         "track_escape": bool(track_escape),
         "stop_on_escape": bool(stop_on_escape),
         "stop_on_escape_fired": False,
+        "escape_persistence": int(escape_persistence),
         "resume": bool(resume),
         "force": bool(force),
         "dry_run": bool(dry_run),
@@ -641,9 +643,18 @@ def _base_run_stats(
         "escape_first_iteration": None,
         "escape_first_raw_iteration": None,
         "escape_first_reliable_iteration": None,
+        "escape_first_persistent_iteration": None,
+        "escape_persistent_detected": False,
         "escape_detected": False,
         "escape_reliable_detected": False,
         "escape_censored": bool(track_escape),
+        "tau_int": None,
+        "tau_int_window": None,
+        "tau_int_samples": None,
+        "tau_int_warnings": None,
+        "tau_int_rel_error": None,
+        "tau_esc": None,
+        "tau_esc_censored": None,
         "escape_convergence_fraction": None,
         "escape_classification_reliable": None,
         "timestamp_start": datetime.datetime.now().isoformat(),
@@ -673,6 +684,77 @@ def _stop_profile(profiler: cProfile.Profile | None) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _format_duration(seconds: float) -> str:
+    """Format a wall-clock duration with adaptive units."""
+    if seconds < 1e-3:
+        return f"{seconds * 1e6:.1f} us"
+    if seconds < 1.0:
+        return f"{seconds * 1e3:.2f} ms"
+    if seconds < 60.0:
+        return f"{seconds:.3f} s"
+    minutes, rem = divmod(seconds, 60.0)
+    return f"{int(minutes)}m {rem:.2f}s"
+
+
+def _r2_all_from_eigs(stacked: np.ndarray) -> float:
+    """``R2_all = sum_{I=1}^{4} Tr X_I^2`` from one trajectory's stacked eigenvalues.
+
+    Channels ``0..3`` hold the Hermitian spectra of ``X_1..X_4``; this matches
+    ``load_R2_all`` in the escape-time analysis.
+    """
+    if stacked.ndim < 2 or stacked.shape[0] < 4:
+        return float("nan")
+    return float(np.sum(np.asarray(stacked[:4]).real ** 2))
+
+
+def _autocorrelation_fft(x) -> np.ndarray:
+    """Normalized autocorrelation function, normalized by pair counts ``n - k``."""
+    values = np.asarray(x, dtype=np.float64)
+    n = values.size
+    if n == 0:
+        return np.asarray([], dtype=np.float64)
+    centered = values - np.mean(values)
+    if float(np.dot(centered, centered)) == 0.0:
+        acf = np.zeros(n, dtype=np.float64)
+        acf[0] = 1.0
+        return acf
+    fft_len = 1 << (2 * n - 1).bit_length()
+    transformed = np.fft.rfft(centered, n=fft_len)
+    acov = np.fft.irfft(transformed * np.conjugate(transformed), n=fft_len)[:n]
+    acov /= np.arange(n, 0, -1, dtype=np.float64)
+    return acov / acov[0]
+
+
+def _integrated_autocorrelation_time(x, c: float = 5.0) -> dict:
+    """Sokal-windowed integrated autocorrelation time in units of trajectories.
+
+    ``tau_int = 1/2 + sum_{k=1}^{W} rho(k)``, with ``W`` the first lag satisfying
+    ``W >= c * tau_int(W)``, capped at the last strictly positive lag.  Uncorrelated
+    data gives ``tau_int = 1/2``; one independent configuration costs
+    ``2 * tau_int`` trajectories.
+    """
+    acf = _autocorrelation_fft(x)
+    n = int(acf.size)
+    warnings: list[str] = []
+    if n == 0:
+        return {"n": 0, "window": 0, "tau_int": float("nan"), "warnings": ["empty series"]}
+    if n < 50:
+        warnings.append("len < 50")
+    nonpositive = np.flatnonzero(acf[1:] <= 0.0)
+    first_nonpositive = int(nonpositive[0] + 1) if nonpositive.size else n
+    max_positive_window = max(0, first_nonpositive - 1)
+    cumulative = 0.5 + np.cumsum(acf[1:])
+    window = max_positive_window
+    for lag in range(1, max_positive_window + 1):
+        if lag >= c * float(cumulative[lag - 1]):
+            window = lag
+            break
+    tau_int = max(0.5, 0.5 + float(np.sum(acf[1 : window + 1])))
+    if n < 10 * tau_int:
+        warnings.append("len < 10*tau_int")
+    return {"n": n, "window": int(window), "tau_int": tau_int, "warnings": warnings}
+
+
 def run(
     model: MatrixModel,
     *,
@@ -694,6 +776,7 @@ def run(
     escape_trx2_rtol: float = 1e-5,
     escape_min_step_size: float = 1e-12,
     escape_max_backtracks: int = 25,
+    escape_persistence: int = 1,
     stop_on_escape: bool = False,
     resume: bool = False,
     force: bool = False,
@@ -730,7 +813,12 @@ def run(
     escape_grad_tol:   Stop descent when the Frobenius norm of the gradient is below this.
     escape_trx2_atol:  Absolute tolerance for matching the initial descended TrX2.
     escape_trx2_rtol:  Relative tolerance for matching the initial descended TrX2.
-    stop_on_escape:    End the run immediately after the first detected escape.
+    escape_persistence: Number of CONSECUTIVE escaped+converged classifications
+                       required before an escape is declared.  The recorded escape
+                       time is the FIRST trajectory of that run, not the last.  Any
+                       other outcome (in-basin, or non-converged) resets the count.
+                       1 (default) reproduces the previous single-event behaviour.
+    stop_on_escape:    End the run immediately after an escape is declared.
     resume:           Append to existing output files and load checkpoint if present.
     force:            Overwrite existing output files without error.
     seed:             RNG seed for reproducibility.
@@ -774,6 +862,7 @@ def run(
                     escape_trx2_atol=escape_trx2_atol,
                     escape_trx2_rtol=escape_trx2_rtol,
                     save_step_eigenvalues=save_step_eigenvalues,
+                    escape_persistence=escape_persistence,
                     stop_on_escape=stop_on_escape)
     run_started_at = time.time()
     run_stats = _base_run_stats(
@@ -797,6 +886,7 @@ def run(
         escape_trx2_rtol=escape_trx2_rtol,
         escape_min_step_size=escape_min_step_size,
         escape_max_backtracks=escape_max_backtracks,
+        escape_persistence=escape_persistence,
         stop_on_escape=stop_on_escape,
         resume=resume,
         force=force,
@@ -878,18 +968,20 @@ def run(
     snapshot_offset = 0
     chunk: np.memmap | None = None
     escaped_once = False
+    escape_streak = 0
+    escape_streak_start: int | None = None
     completed_iters = 0
     escape_classifications = 0
     escape_converged_count = 0
 
-    # When classifying escapes, hold the trajectory line back so the verdict can
+    # R2_all series and its in-basin mask, used for the tau_int estimate below.
+    r2_series: list[float] = []
+    basin_flags: list[bool] = []
+
+    # Hold the trajectory line back so the escape verdict and the elapsed time can
     # be appended to it before it is printed.
     pending_traj_line: list[str] = []
-    traj_line_sink = (
-        pending_traj_line.append
-        if (track_escape and escape_path is not None and not quiet_trajectories)
-        else None
-    )
+    traj_line_sink = pending_traj_line.append if not quiet_trajectories else None
 
     if save_matrices:
         snapshot_dir, snapshot_offset = _prepare_matrix_snapshot_dir(
@@ -901,7 +993,10 @@ def run(
     for i in range(1, niters + 1):
         completed_iters = i
         escape_verdict: str | None = None
+        escape_declaration_msg: str | None = None
+        in_basin_flag = True
         pending_traj_line.clear()
+        traj_started_at = time.perf_counter()
         if measure_step_eigenvalues is None:
             acc_count = update(
                 acc_count,
@@ -927,6 +1022,8 @@ def run(
             step_eig_buf.append(step_values)
             step_accept_buf.append(accepted)
 
+        traj_seconds = time.perf_counter() - traj_started_at
+
         if snapshot_dir is not None:
             global_i = snapshot_offset + i
             if chunk is None or (global_i - 1) % save_every == 0:
@@ -944,7 +1041,9 @@ def run(
             chunk[global_i - (snapshot_offset + (i - 1) // save_every * save_every) - 1] = state.numpy()
 
         eigs, corrs = model.measure_observables()
-        ev_buf.append(np.stack(eigs))
+        stacked_eigs = np.stack(eigs)
+        ev_buf.append(stacked_eigs)
+        r2_series.append(_r2_all_from_eigs(stacked_eigs))
         if corrs is not None:
             corr_buf.append(corrs)
 
@@ -997,6 +1096,7 @@ def run(
                     escaped = False
                     converged = converged and validation_converged
             escape_classifications += 1
+            in_basin_flag = bool(in_initial_basin and converged)
             escape_verdict = (
                 "Undecided" if not converged else ("True" if escaped else "False")
             )
@@ -1007,7 +1107,37 @@ def run(
                     "WARNING: Escape-like classification did not converge "
                     f"at iteration {i}; keeping the run marked unreliable."
                 )
-            escaped_once = escaped_once or (escaped and converged)
+            # Persistence: declare an escape only after `escape_persistence`
+            # consecutive escaped+converged classifications, and record the FIRST
+            # trajectory of that run.  At the separatrix the committor is ~1/2, so
+            # roughly half of all crossings recross; requiring a run rejects those.
+            if escaped and converged:
+                if escape_streak == 0:
+                    escape_streak_start = int(i)
+                escape_streak += 1
+            else:
+                escape_streak = 0
+                escape_streak_start = None
+
+            if (
+                escape_streak >= escape_persistence
+                and run_stats["escape_first_persistent_iteration"] is None
+            ):
+                run_stats["escape_first_persistent_iteration"] = int(escape_streak_start)
+                run_stats["escape_persistent_detected"] = True
+                if escape_persistence > 1:
+                    run_stats["escape_first_iteration"] = int(escape_streak_start)
+                    escape_declaration_msg = (
+                        f"Escape declared at iteration {escape_streak_start}: "
+                        f"{escape_persistence} consecutive escaped classifications "
+                        f"({escape_streak_start}..{i})."
+                    )
+            escaped_once = bool(run_stats["escape_persistent_detected"])
+
+            if escape_persistence > 1 and escaped and converged:
+                escape_verdict = (
+                    f"True ({min(escape_streak, escape_persistence)}/{escape_persistence})"
+                )
             escape_buf["iteration"].append(i)
             escape_buf["escaped"].append(escaped)
             escape_buf["in_initial_basin"].append(in_initial_basin)
@@ -1030,11 +1160,15 @@ def run(
                 run_stats["escape_first_reliable_iteration"] = int(i)
                 run_stats["escape_reliable_detected"] = True
 
+        basin_flags.append(in_basin_flag)
+
         if pending_traj_line:
             line = pending_traj_line.pop()
             if escape_verdict is not None:
                 line = f"{line.rstrip()} has escaped = {escape_verdict}"
-            print(line)
+            print(f"{line.rstrip()}  [{_format_duration(traj_seconds)}]")
+        if escape_declaration_msg is not None:
+            print(escape_declaration_msg)
 
         if i % save_every == 0:
             _flush_buffers(ev_buf, corr_buf, paths)
@@ -1062,7 +1196,11 @@ def run(
                 model.save_state(paths["ckpt"])
 
         if stop_on_escape and escaped_once:
-            print(f"Escape detected at iteration {i}; stopping early because stop_on_escape=True.")
+            declared = run_stats["escape_first_persistent_iteration"]
+            print(
+                f"Escape declared at iteration {declared}; stopping early at "
+                f"iteration {i} because stop_on_escape=True."
+            )
             run_stats["stop_on_escape_fired"] = True
             break
 
@@ -1095,13 +1233,81 @@ def run(
         else:
             run_stats["escape_convergence_fraction"] = 0.0
             run_stats["escape_classification_reliable"] = False
-        run_stats["escape_censored"] = bool(not run_stats["escape_detected"])
+        if escape_persistence > 1:
+            run_stats["escape_censored"] = bool(not run_stats["escape_persistent_detected"])
+        else:
+            run_stats["escape_censored"] = bool(not run_stats["escape_detected"])
+    # ------------------------------------------------------------------ #
+    # tau_int : integrated autocorrelation time of R2_all = sum_I Tr X_I^2,
+    #           measured on the in-basin segment only (the slowest global mode
+    #           IS the escape, so including it would be circular).
+    # tau_esc : first-passage time in trajectories; right-censored when the run
+    #           finished without a reliable escape.
+    # ------------------------------------------------------------------ #
+    segment = [
+        value
+        for value, in_basin in zip(r2_series, basin_flags)
+        if in_basin and math.isfinite(value)
+    ]
+    tau_info = _integrated_autocorrelation_time(segment)
+    tau_int = float(tau_info["tau_int"])
+    has_tau_int = bool(tau_info["n"]) and math.isfinite(tau_int)
+
+    run_stats["tau_int"] = tau_int if has_tau_int else None
+    run_stats["tau_int_window"] = int(tau_info["window"]) if has_tau_int else None
+    run_stats["tau_int_samples"] = int(tau_info["n"])
+
+    # sd[tau_int(W)] / tau_int ~ sqrt(2(2W+1)/N_tot).  A single run is one replica;
+    # the pooled multi-replica estimate is the one to quote in an analysis.
+    tau_int_rel_error = None
+    if has_tau_int and tau_info["n"] > 0:
+        tau_int_rel_error = math.sqrt(
+            2.0 * (2.0 * int(tau_info["window"]) + 1.0) / float(tau_info["n"])
+        )
+        run_stats["tau_int_rel_error"] = float(tau_int_rel_error)
+        if tau_int_rel_error > 0.15:
+            tau_info["warnings"].append(f"single-run estimate, rel. error ~{tau_int_rel_error:.0%}")
+    run_stats["tau_int_warnings"] = list(tau_info["warnings"])
+
+    tau_esc_event = bool(track_escape and run_stats["escape_persistent_detected"])
+    run_stats["tau_esc"] = (
+        int(run_stats["escape_first_persistent_iteration"]) if tau_esc_event else None
+    )
+    run_stats["tau_esc_censored"] = bool(track_escape and not tau_esc_event)
+
     run_stats["timestamp_end"] = datetime.datetime.now().isoformat()
     run_stats["runtime_seconds"] = time.time() - run_started_at
     run_stats["run_complete"] = True
     _write_run_stats(stats_path, run_stats)
 
     _stop_profile(profiler)
+
+    if has_tau_int:
+        tau_int_text = (
+            f"{tau_int:.4f} +/- {tau_int * tau_int_rel_error:.4f}  "
+            f"(Sokal window {run_stats['tau_int_window']}, "
+            f"{run_stats['tau_int_samples']} in-basin samples)"
+        )
+    else:
+        tau_int_text = "n/a (no samples)"
+    if not track_escape:
+        tau_esc_text = "n/a (escape tracking off)"
+    elif tau_esc_event:
+        tau_esc_text = f"{run_stats['tau_esc']} trajectories"
+        if escape_persistence > 1:
+            tau_esc_text += f"  (first of {escape_persistence} consecutive)"
+    else:
+        tau_esc_text = f"> {completed_iters} trajectories (censored, no escape)"
+
+    print("=" * 52)
+    print(f"  tau_int  =  {tau_int_text}")
+    print(f"  tau_esc  =  {tau_esc_text}")
+    if has_tau_int and tau_esc_event and tau_int > 0.0:
+        print(f"  tau_esc / tau_int  =  {run_stats['tau_esc'] / tau_int:.1f}  (dimensionless)")
+    if tau_info["warnings"]:
+        print(f"  WARNING (tau_int): {', '.join(tau_info['warnings'])}")
+    print("=" * 52)
+
     return model
 
 
