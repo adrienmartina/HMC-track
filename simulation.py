@@ -994,6 +994,7 @@ def run(
         completed_iters = i
         escape_verdict: str | None = None
         escape_declaration_msg: str | None = None
+        descent_seconds: float | None = None
         in_basin_flag = True
         pending_traj_line.clear()
         traj_started_at = time.perf_counter()
@@ -1048,6 +1049,7 @@ def run(
             corr_buf.append(corrs)
 
         if track_escape and escape_path is not None and reference_trx2 is not None:
+            descent_started_at = time.perf_counter()
             _, escape_info = _classical_gradient_descent(
                 model,
                 model.get_state(),
@@ -1095,6 +1097,8 @@ def run(
                     in_initial_basin = True
                     escaped = False
                     converged = converged and validation_converged
+            descent_seconds = time.perf_counter() - descent_started_at
+
             escape_classifications += 1
             in_basin_flag = bool(in_initial_basin and converged)
             escape_verdict = (
@@ -1166,7 +1170,10 @@ def run(
             line = pending_traj_line.pop()
             if escape_verdict is not None:
                 line = f"{line.rstrip()} has escaped = {escape_verdict}"
-            print(f"{line.rstrip()}  [{_format_duration(traj_seconds)}]")
+            timing = f"HMC {_format_duration(traj_seconds)}"
+            if descent_seconds is not None:
+                timing += f" | descent {_format_duration(descent_seconds)}"
+            print(f"{line.rstrip()}  [{timing}]")
         if escape_declaration_msg is not None:
             print(escape_declaration_msg)
 
