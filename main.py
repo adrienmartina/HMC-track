@@ -40,6 +40,7 @@ def main() -> None:
         save_every=args.save_every,
         save_checkpoints=args.save,
         save_matrices=args.saveAllMats,
+        save_evals=args.save_evals,
         save_step_eigenvalues=args.save_step_eigenvalues,
         track_escape=args.track_escape,
         escape_descent_steps=args.escape_descent_steps,

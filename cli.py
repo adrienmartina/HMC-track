@@ -375,6 +375,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Flush observables and (if --save) write checkpoint every K trajectories.")
     parser.add_argument("--saveAllMats", action="store_true",
                         help="Also dump raw matrix snapshots every --save-every trajectories.")
+    parser.add_argument("--save-evals", action=argparse.BooleanOptionalAction, default=True,
+                        help="Write per-trajectory eigenvalues to evals.npz (default: on). "
+                             "--no-save-evals skips the file; observables are still measured, so "
+                             "tau_int and run_stats.json are unaffected, but the pooled multi-replica "
+                             "tau_int of the escape-time analysis needs evals.npz and will not be "
+                             "reconstructible.")
     parser.add_argument("--save-step-eigenvalues", action=argparse.BooleanOptionalAction, default=True,
                         help="Save type-II per-leapfrog-step eigenvalue diagnostics when available.")
     parser.add_argument("--track-escape", action="store_true",

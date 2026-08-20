@@ -574,6 +574,7 @@ def _base_run_stats(
     save_every: int,
     save_checkpoints: bool,
     save_matrices: bool,
+    save_evals: bool,
     save_step_eigenvalues: bool,
     track_escape: bool,
     escape_descent_steps: int,
@@ -617,6 +618,7 @@ def _base_run_stats(
         "save_every": int(save_every),
         "save_checkpoints": bool(save_checkpoints),
         "save_matrices": bool(save_matrices),
+        "save_evals": bool(save_evals),
         "save_step_eigenvalues": bool(save_step_eigenvalues),
         "step_eigenvalues_disabled": not bool(save_step_eigenvalues),
         "track_escape": bool(track_escape),
@@ -766,6 +768,7 @@ def run(
     save_every: int = 10,
     save_checkpoints: bool = True,
     save_matrices: bool = False,
+    save_evals: bool = True,
     save_step_eigenvalues: bool = True,
     track_escape: bool = False,
     escape_descent_steps: int = 1000,
@@ -798,6 +801,11 @@ def run(
     save_every:       Flush observables (and checkpoint if save_checkpoints) every K steps.
     save_checkpoints: Write a checkpoint .pt file every save_every steps.
     save_matrices:    Also write raw matrix snapshots.
+    save_evals:       Write per-trajectory eigenvalues to evals.npz.  Disabling it
+                      changes no measurement: observables are still computed and
+                      tau_int is estimated from the in-memory series.  It only skips
+                      the file, so the pooled multi-replica tau_int of the escape-time
+                      analysis (which reads evals.npz) becomes unreconstructible.
     save_step_eigenvalues:
                        Write per-leapfrog-step eigenvalue diagnostics when the model supports them.
     track_escape:     Run classical gradient descent after each HMC trajectory
@@ -845,7 +853,9 @@ def run(
     step_eigs_path = paths.get("step_eigs") if measure_step_eigenvalues is not None else None
     step_eig_labels = tuple(getattr(model, "step_eigenvalue_labels", ()))
     escape_path = os.path.join(paths["dir"], "escape.npz") if track_escape else None
-    output_slots = [paths["eigs"], paths["corrs"]]
+    output_slots = [paths["corrs"]]
+    if save_evals:
+        output_slots.insert(0, paths["eigs"])
     if step_eigs_path is not None:
         output_slots.append(step_eigs_path)
     if escape_path is not None:
@@ -861,6 +871,7 @@ def run(
                     escape_grad_tol=escape_grad_tol,
                     escape_trx2_atol=escape_trx2_atol,
                     escape_trx2_rtol=escape_trx2_rtol,
+                    save_evals=save_evals,
                     save_step_eigenvalues=save_step_eigenvalues,
                     escape_persistence=escape_persistence,
                     stop_on_escape=stop_on_escape)
@@ -876,6 +887,7 @@ def run(
         save_every=save_every,
         save_checkpoints=save_checkpoints,
         save_matrices=save_matrices,
+        save_evals=save_evals,
         save_step_eigenvalues=save_step_eigenvalues,
         track_escape=track_escape,
         escape_descent_steps=escape_descent_steps,
@@ -907,6 +919,8 @@ def run(
     print(f"  CPU threads    {_config.CPU_NUM_THREADS}/{_config.CPU_NUM_INTEROP_THREADS} (intra/inter-op)")
     print(f"  Checkpoint     {'every ' + str(save_every) + ' steps' if save_checkpoints else 'disabled'}")
     print(f"  Output dir     {paths['dir']}")
+    if not save_evals:
+        print("  Eigenvalues    not saved (--no-save-evals)")
     if step_eigs_path is not None:
         print(f"  Step evals     {step_eigs_path}")
     if escape_path is not None:
@@ -1043,7 +1057,8 @@ def run(
 
         eigs, corrs = model.measure_observables()
         stacked_eigs = np.stack(eigs)
-        ev_buf.append(stacked_eigs)
+        if save_evals:
+            ev_buf.append(stacked_eigs)
         r2_series.append(_r2_all_from_eigs(stacked_eigs))
         if corrs is not None:
             corr_buf.append(corrs)
