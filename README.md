@@ -62,7 +62,7 @@ model = PIKKTTypeIModel(ncol=30, couplings=[1.0], massless=True)
 
 ### `pikkt4d_type2` — Type II polarized IKKT, *SO*(3) invariant
 
-$$S = \frac{N}{g}\mathrm{Tr}\!\Bigl[-\tfrac{1}{4}[X_I,X_J]^2 - \tfrac{i}{2}\bar\psi\,\Gamma^I[X_I,\psi] + \tfrac{i(2+2\omega)}{3}\epsilon_{ijk}X_iX_jX_k + \cdots\Bigr]$$
+$$S = \frac{N}{g}\mathrm{Tr}\Bigl[-\tfrac{1}{4}[X_I,X_J]^2 - \tfrac{i}{2}\bar\psi\,\Gamma^I[X_I,\psi] + \tfrac{i(2+2\omega)}{3}\epsilon_{ijk}X_iX_jX_k + \cdots\Bigr]$$
 
 - Fixed $D=4$, couplings `g` and `omega`
 - Flags: `--spin` (fuzzy-sphere initial condition), `--bosonic`, `--lorentzian`
