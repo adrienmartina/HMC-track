@@ -48,7 +48,7 @@ matrix-hmc-track --model pikkt10d --ncol 20 --coupling 0.1 \
 
 ### `pikkt4d_type1` — Type I polarized IKKT, *SO*(4) invariant
 
-$$S = \frac{N}{g}\operatorname{Tr}\!\Bigl[-\tfrac{1}{4}[X_I,X_J]^2 - \tfrac{i}{2}\bar\psi\,\Gamma^I[X_I,\psi] + X_I^2 + \eta\,\bar\psi\psi\Bigr]$$
+$$S = \frac{N}{g}\mathrm{Tr}\!\Bigl[-\tfrac{1}{4}[X_I,X_J]^2 - \tfrac{i}{2}\bar\psi\,\Gamma^I[X_I,\psi] + X_I^2 + \eta\,\bar\psi\psi\Bigr]$$
 
 - Fixed $D=4$, coupling `g`, optional deformation `eta` (default 1.0)
 - Flags: `--eta`, `--massless` (drops $X^2$ and Myers terms)
@@ -62,7 +62,7 @@ model = PIKKTTypeIModel(ncol=30, couplings=[1.0], massless=True)
 
 ### `pikkt4d_type2` — Type II polarized IKKT, *SO*(3) invariant
 
-$$S = \frac{N}{g}\operatorname{Tr}\!\Bigl[-\tfrac{1}{4}[X_I,X_J]^2 - \tfrac{i}{2}\bar\psi\,\Gamma^I[X_I,\psi] + \tfrac{i(2+2\omega)}{3}\epsilon_{ijk}X_iX_jX_k + \cdots\Bigr]$$
+$$S = \frac{N}{g}\mathrm{Tr}\!\Bigl[-\tfrac{1}{4}[X_I,X_J]^2 - \tfrac{i}{2}\bar\psi\,\Gamma^I[X_I,\psi] + \tfrac{i(2+2\omega)}{3}\epsilon_{ijk}X_iX_jX_k + \cdots\Bigr]$$
 
 - Fixed $D=4$, couplings `g` and `omega`
 - Flags: `--spin` (fuzzy-sphere initial condition), `--bosonic`, `--lorentzian`
@@ -118,7 +118,7 @@ model = SUSYYM3DModel(ncol=12, couplings=[60.0], fermion_mass=1.0)
 
 ### `1mm` — Single-matrix polynomial model
 
-$$V(X) = \sum_n t_n \operatorname{Tr}(X^n)$$
+$$V(X) = \sum_n t_n \mathrm{Tr}(X^n)$$
 
 - Couplings `t1 t2 ...` set the polynomial coefficients
 
