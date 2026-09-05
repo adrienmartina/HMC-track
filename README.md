@@ -48,7 +48,7 @@ matrix-hmc-track --model pikkt10d --ncol 20 --coupling 0.1 \
 
 ### `pikkt4d_type1` — Type I polarized IKKT, *SO*(4) invariant
 
-$$S = \frac{N}{g}\mathrm{Tr}\!\Bigl[-\tfrac{1}{4}[X_I,X_J]^2 - \tfrac{i}{2}\bar\psi\,\Gamma^I[X_I,\psi] + X_I^2 + \eta\,\bar\psi\psi\Bigr]$$
+$$S = \frac{N}{g}\mathrm{Tr}\Bigl[-\tfrac{1}{4}[X_I,X_J]^2 - \tfrac{i}{2}\bar\psi\,\Gamma^I[X_I,\psi] + X_I^2 + \eta\,\bar\psi\psi\Bigr]$$
 
 - Fixed $D=4$, coupling `g`, optional deformation `eta` (default 1.0)
 - Flags: `--eta`, `--massless` (drops $X^2$ and Myers terms)
